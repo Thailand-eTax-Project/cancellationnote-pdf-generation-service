@@ -1,0 +1,60 @@
+server:
+  port: 0
+
+spring:
+  application:
+    name: cancellationnote-pdf-generation-service-test
+  datasource:
+    url: jdbc:h2:mem:cancellationnotepdf_db;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+  flyway:
+    enabled: false
+
+camel:
+  springboot:
+    name: cancellationnote-pdf-generation-test-camel
+    main-run-controller: false
+
+app:
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      command-group-id: cancellationnote-pdf-generation-command-test
+      compensation-group-id: cancellationnote-pdf-generation-compensation-test
+    topics:
+      saga-command-cancellation-note-pdf: saga.command.cancellation-note-pdf
+      saga-compensation-cancellation-note-pdf: saga.compensation.cancellation-note-pdf
+      pdf-generated-cancellation-note: pdf.generated.cancellation-note
+      dlq: pdf.generation.cancellation-note.dlq
+  minio:
+    endpoint: http://localhost:9000
+    access-key: minioadmin
+    secret-key: minioadmin
+    bucket-name: cancellationnotes
+    region: us-east-1
+    base-url: http://localhost:9000/cancellationnotes
+  pdf:
+    generation:
+      max-retries: 3
+      max-concurrent-renders: 1
+      max-pdf-size-bytes: 52428800
+  fonts:
+    health-check:
+      enabled: false
+
+eureka:
+  client:
+    enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
