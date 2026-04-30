@@ -7,9 +7,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class PdfGenerationMetrics {
 
-    private final Counter generatedCounter;
-    private final Counter failedCounter;
-    private final Counter retryExhaustedCounter;
+    final Counter generatedCounter;
+    final Counter failedCounter;
+    final Counter retryExhaustedCounter;
 
     public PdfGenerationMetrics(MeterRegistry registry) {
         this.generatedCounter = Counter.builder("pdf.generation.cancellation_note.generated")

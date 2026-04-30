@@ -283,6 +283,74 @@
                 <artifactId>flyway-maven-plugin</artifactId>
                 <version>${flyway.version}</version>
             </plugin>
+
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.11</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>PACKAGE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                            <excludes>
+                                <!-- Spring Boot entry point — nothing meaningful to unit-test -->
+                                <exclude>com/wpanther/cancellationnote/pdf/CancellationNotePdfGenerationServiceApplication.class</exclude>
+                                <!-- Spring @Configuration wiring — exercised by context load, not meaningful to unit-test -->
+                                <exclude>com/wpanther/cancellationnote/pdf/infrastructure/config/*.class</exclude>
+                                <!-- Kafka adapter classes - wire-format DTOs tested via integration tests -->
+                                <exclude>com/wpanther/cancellationnote/pdf/infrastructure/adapter/in/kafka/*.class</exclude>
+                                <!-- Outbound port interfaces — no bytecode to instrument -->
+                                <exclude>com/wpanther/cancellationnote/pdf/application/port/out/*.class</exclude>
+                                <!-- Spring Data interface — no bytecode to instrument -->
+                                <exclude>com/wpanther/cancellationnote/pdf/infrastructure/adapter/out/persistence/outbox/SpringDataOutboxRepository.class</exclude>
+                                <!-- Messaging publishers — exercised via integration tests (Kafka/Debezium) -->
+                                <exclude>com/wpanther/cancellationnote/pdf/infrastructure/adapter/out/messaging/*.class</exclude>
+                                <!-- Storage adapter — requires MinIO, tested via integration tests -->
+                                <exclude>com/wpanther/cancellationnote/pdf/infrastructure/adapter/out/storage/*.class</exclude>
+                                <!-- PDF generation — requires FOP + fonts + ICC profile, tested via integration tests -->
+                                <exclude>com/wpanther/cancellationnote/pdf/infrastructure/adapter/out/pdf/*.class</exclude>
+                                <!-- REST client — requires external HTTP endpoint, tested via integration tests -->
+                                <exclude>com/wpanther/cancellationnote/pdf/infrastructure/adapter/out/client/*.class</exclude>
+                                <!-- Persistence adapter — requires DB, tested via integration tests -->
+                                <exclude>com/wpanther/cancellationnote/pdf/infrastructure/adapter/out/persistence/**/*.class</exclude>
+                                <!-- Application services — exercised via integration tests -->
+                                <exclude>com/wpanther/cancellationnote/pdf/application/service/*.class</exclude>
+                                <!-- Metrics — exercised via integration tests -->
+                                <exclude>com/wpanther/cancellationnote/pdf/infrastructure/metrics/*.class</exclude>
+                            </excludes>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>
