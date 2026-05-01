@@ -65,17 +65,20 @@ public class SagaCommandHandler implements ProcessCancellationNotePdfUseCase, Co
                 String signedXmlUrl  = command.getSignedXmlUrl();
                 String documentId    = command.getDocumentId();
                 String documentNum   = command.getDocumentNumber();
+                String sagaId         = command.getSagaId();
+                SagaStep sagaStep     = command.getSagaStep();
+                String correlationId  = command.getCorrelationId();
 
                 if (signedXmlUrl == null || signedXmlUrl.isBlank()) {
-                    pdfDocumentService.publishGenerationFailure(command, "signedXmlUrl is null or blank");
+                    pdfDocumentService.publishGenerationFailure(sagaId, sagaStep, correlationId, "signedXmlUrl is null or blank");
                     return;
                 }
                 if (documentId == null || documentId.isBlank()) {
-                    pdfDocumentService.publishGenerationFailure(command, "documentId is null or blank");
+                    pdfDocumentService.publishGenerationFailure(sagaId, sagaStep, correlationId, "documentId is null or blank");
                     return;
                 }
                 if (documentNum == null || documentNum.isBlank()) {
-                    pdfDocumentService.publishGenerationFailure(command, "documentNumber is null or blank");
+                    pdfDocumentService.publishGenerationFailure(sagaId, sagaStep, correlationId, "documentNumber is null or blank");
                     return;
                 }
 
@@ -83,7 +86,7 @@ public class SagaCommandHandler implements ProcessCancellationNotePdfUseCase, Co
                         pdfDocumentService.findByCancellationNoteId(documentId);
 
                 if (existing.isPresent() && existing.get().isCompleted()) {
-                    pdfDocumentService.publishIdempotentSuccess(existing.get(), command);
+                    pdfDocumentService.publishIdempotentSuccess(existing.get(), documentId, documentNum, sagaId, sagaStep, correlationId);
                     return;
                 }
 
@@ -91,7 +94,7 @@ public class SagaCommandHandler implements ProcessCancellationNotePdfUseCase, Co
 
                 if (existing.isPresent()) {
                     if (existing.get().isMaxRetriesExceeded(maxRetries)) {
-                        pdfDocumentService.publishRetryExhausted(command);
+                        pdfDocumentService.publishRetryExhausted(sagaId, sagaStep, correlationId, documentId, documentNum);
                         return;
                     }
                 }
@@ -112,42 +115,43 @@ public class SagaCommandHandler implements ProcessCancellationNotePdfUseCase, Co
                     String fileUrl   = pdfStoragePort.resolveUrl(s3Key);
 
                     pdfDocumentService.completeGenerationAndPublish(
-                            document.getId(), s3Key, fileUrl, pdfBytes.length, previousRetryCount, command);
+                            document.getId(), s3Key, fileUrl, pdfBytes.length, previousRetryCount,
+                            documentId, documentNum, sagaId, sagaStep, correlationId);
 
                 } catch (CallNotPermittedException e) {
                     log.warn("Circuit breaker OPEN for saga {} document {}: {}",
-                            command.getSagaId(), documentNum, e.getMessage());
+                            sagaId, documentNum, e.getMessage());
                     pdfDocumentService.failGenerationAndPublish(
                             document.getId(), "Circuit breaker open: " + e.getMessage(),
-                            previousRetryCount, command);
+                            previousRetryCount, sagaId, sagaStep, correlationId);
 
                 } catch (RestClientException e) {
                     log.warn("HTTP error fetching signed XML for saga {} document {}: {}",
-                            command.getSagaId(), documentNum, e.getMessage());
+                            sagaId, documentNum, e.getMessage());
                     pdfDocumentService.failGenerationAndPublish(
                             document.getId(), "HTTP error fetching signed XML: " + describeThrowable(e),
-                            previousRetryCount, command);
+                            previousRetryCount, sagaId, sagaStep, correlationId);
 
                 } catch (Exception e) {
                     if (s3Key != null) {
                         try { pdfStoragePort.delete(s3Key); }
                         catch (Exception del) {
-                            log.error("[ORPHAN_PDF] s3Key={} saga={} error={}", s3Key, command.getSagaId(),
+                            log.error("[ORPHAN_PDF] s3Key={} saga={} error={}", s3Key, sagaId,
                                     describeThrowable(del));
                         }
                     }
                     log.error("PDF generation failed for saga {} document {}: {}",
-                            command.getSagaId(), documentNum, e.getMessage(), e);
+                            sagaId, documentNum, e.getMessage(), e);
                     pdfDocumentService.failGenerationAndPublish(
-                            document.getId(), describeThrowable(e), previousRetryCount, command);
+                            document.getId(), describeThrowable(e), previousRetryCount, sagaId, sagaStep, correlationId);
                 }
 
             } catch (OptimisticLockingFailureException e) {
                 log.warn("Concurrent modification for saga {}: {}", command.getSagaId(), e.getMessage());
-                pdfDocumentService.publishGenerationFailure(command, "Concurrent modification: " + e.getMessage());
+                pdfDocumentService.publishGenerationFailure(command.getSagaId(), command.getSagaStep(), command.getCorrelationId(), "Concurrent modification: " + e.getMessage());
             } catch (Exception e) {
                 log.error("Unexpected error for saga {}: {}", command.getSagaId(), e.getMessage(), e);
-                pdfDocumentService.publishGenerationFailure(command, describeThrowable(e));
+                pdfDocumentService.publishGenerationFailure(command.getSagaId(), command.getSagaStep(), command.getCorrelationId(), describeThrowable(e));
             }
         } finally {
             MDC.clear();
@@ -182,12 +186,12 @@ public class SagaCommandHandler implements ProcessCancellationNotePdfUseCase, Co
                     log.info("No document for documentId {} — already compensated",
                             command.getDocumentId());
                 }
-                pdfDocumentService.publishCompensated(command);
+                pdfDocumentService.publishCompensated(command.getSagaId(), command.getSagaStep(), command.getCorrelationId());
 
             } catch (Exception e) {
                 log.error("Failed to compensate for saga {}: {}", command.getSagaId(), e.getMessage(), e);
                 pdfDocumentService.publishCompensationFailure(
-                        command, "Compensation failed: " + describeThrowable(e));
+                        command.getSagaId(), command.getSagaStep(), command.getCorrelationId(), "Compensation failed: " + describeThrowable(e));
             }
         } finally {
             MDC.clear();

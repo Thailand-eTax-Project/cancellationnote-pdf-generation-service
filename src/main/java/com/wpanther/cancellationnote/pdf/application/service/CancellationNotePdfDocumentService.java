@@ -1,14 +1,12 @@
 package com.wpanther.cancellationnote.pdf.application.service;
 
+import com.wpanther.cancellationnote.pdf.application.dto.event.CancellationNotePdfGeneratedEvent;
 import com.wpanther.cancellationnote.pdf.application.port.out.PdfEventPort;
-import com.wpanther.cancellationnote.pdf.application.port.out.PdfStoragePort;
 import com.wpanther.cancellationnote.pdf.application.port.out.SagaReplyPort;
 import com.wpanther.cancellationnote.pdf.domain.model.CancellationNotePdfDocument;
 import com.wpanther.cancellationnote.pdf.domain.repository.CancellationNotePdfDocumentRepository;
-import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.KafkaCancellationNoteCompensateCommand;
-import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.KafkaCancellationNoteProcessCommand;
-import com.wpanther.cancellationnote.pdf.application.dto.event.CancellationNotePdfGeneratedEvent;
 import com.wpanther.cancellationnote.pdf.infrastructure.metrics.PdfGenerationMetrics;
+import com.wpanther.saga.domain.enums.SagaStep;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -61,37 +59,35 @@ public class CancellationNotePdfDocumentService {
     @Transactional
     public void completeGenerationAndPublish(UUID documentId, String s3Key, String fileUrl,
                                              long fileSize, int previousRetryCount,
-                                             KafkaCancellationNoteProcessCommand command) {
+                                             String cmdDocumentId, String cmdDocumentNumber,
+                                             String sagaId, SagaStep sagaStep, String correlationId) {
         CancellationNotePdfDocument doc = requireDocument(documentId);
         doc.markCompleted(s3Key, fileUrl, fileSize);
         doc.markXmlEmbedded();
         applyRetryCount(doc, previousRetryCount);
         doc = repository.save(doc);
 
-        pdfEventPort.publishGenerated(buildGeneratedEvent(doc, command));
-        sagaReplyPort.publishSuccess(
-                command.getSagaId(), command.getSagaStep(), command.getCorrelationId(),
-                doc.getDocumentUrl(), doc.getFileSize());
+        pdfEventPort.publishGenerated(buildGeneratedEvent(doc, cmdDocumentId, cmdDocumentNumber, sagaId, correlationId));
+        sagaReplyPort.publishSuccess(sagaId, sagaStep, correlationId, doc.getDocumentUrl(), doc.getFileSize());
 
         log.info("Completed PDF generation for saga {} cancellation note {}",
-                command.getSagaId(), doc.getCancellationNoteNumber());
+                sagaId, doc.getCancellationNoteNumber());
     }
 
     @Transactional
     public void failGenerationAndPublish(UUID documentId, String errorMessage,
                                          int previousRetryCount,
-                                         KafkaCancellationNoteProcessCommand command) {
+                                         String sagaId, SagaStep sagaStep, String correlationId) {
         String safeError = errorMessage != null ? errorMessage : "PDF generation failed";
         CancellationNotePdfDocument doc = requireDocument(documentId);
         doc.markFailed(safeError);
         applyRetryCount(doc, previousRetryCount);
         repository.save(doc);
 
-        sagaReplyPort.publishFailure(
-                command.getSagaId(), command.getSagaStep(), command.getCorrelationId(), safeError);
+        sagaReplyPort.publishFailure(sagaId, sagaStep, correlationId, safeError);
 
         log.warn("PDF generation failed for saga {} cancellation note {}: {}",
-                command.getSagaId(), doc.getCancellationNoteNumber(), safeError);
+                sagaId, doc.getCancellationNoteNumber(), safeError);
     }
 
     @Transactional
@@ -102,56 +98,47 @@ public class CancellationNotePdfDocumentService {
 
     @Transactional
     public void publishIdempotentSuccess(CancellationNotePdfDocument existing,
-                                         KafkaCancellationNoteProcessCommand command) {
-        pdfEventPort.publishGenerated(buildGeneratedEvent(existing, command));
-        sagaReplyPort.publishSuccess(
-                command.getSagaId(), command.getSagaStep(), command.getCorrelationId(),
-                existing.getDocumentUrl(), existing.getFileSize());
-        log.warn("Cancellation note PDF already generated for saga {} — re-publishing SUCCESS reply",
-                command.getSagaId());
+                                         String documentId, String documentNumber,
+                                         String sagaId, SagaStep sagaStep, String correlationId) {
+        pdfEventPort.publishGenerated(buildGeneratedEvent(existing, documentId, documentNumber, sagaId, correlationId));
+        sagaReplyPort.publishSuccess(sagaId, sagaStep, correlationId, existing.getDocumentUrl(), existing.getFileSize());
+        log.warn("Cancellation note PDF already generated for saga {} — re-publishing SUCCESS reply", sagaId);
     }
 
     @Transactional
-    public void publishRetryExhausted(KafkaCancellationNoteProcessCommand command) {
-        pdfGenerationMetrics.recordRetryExhausted(
-                command.getSagaId(),
-                command.getDocumentId(),
-                command.getDocumentNumber());
-        sagaReplyPort.publishFailure(
-                command.getSagaId(), command.getSagaStep(), command.getCorrelationId(),
-                "Maximum retry attempts exceeded");
-        log.error("Max retries exceeded for saga {} document {}",
-                command.getSagaId(), command.getDocumentNumber());
+    public void publishRetryExhausted(String sagaId, SagaStep sagaStep, String correlationId,
+                                      String documentId, String documentNumber) {
+        pdfGenerationMetrics.recordRetryExhausted(sagaId, documentId, documentNumber);
+        sagaReplyPort.publishFailure(sagaId, sagaStep, correlationId, "Maximum retry attempts exceeded");
+        log.error("Max retries exceeded for saga {} document {}", sagaId, documentNumber);
     }
 
     @Transactional
-    public void publishGenerationFailure(KafkaCancellationNoteProcessCommand command, String errorMessage) {
-        sagaReplyPort.publishFailure(
-                command.getSagaId(), command.getSagaStep(), command.getCorrelationId(), errorMessage);
+    public void publishGenerationFailure(String sagaId, SagaStep sagaStep, String correlationId, String errorMessage) {
+        sagaReplyPort.publishFailure(sagaId, sagaStep, correlationId, errorMessage);
     }
 
     @Transactional
-    public void publishCompensated(KafkaCancellationNoteCompensateCommand command) {
-        sagaReplyPort.publishCompensated(
-                command.getSagaId(), command.getSagaStep(), command.getCorrelationId());
+    public void publishCompensated(String sagaId, SagaStep sagaStep, String correlationId) {
+        sagaReplyPort.publishCompensated(sagaId, sagaStep, correlationId);
     }
 
     @Transactional
-    public void publishCompensationFailure(KafkaCancellationNoteCompensateCommand command, String error) {
-        sagaReplyPort.publishFailure(
-                command.getSagaId(), command.getSagaStep(), command.getCorrelationId(), error);
+    public void publishCompensationFailure(String sagaId, SagaStep sagaStep, String correlationId, String error) {
+        sagaReplyPort.publishFailure(sagaId, sagaStep, correlationId, error);
     }
 
     private CancellationNotePdfGeneratedEvent buildGeneratedEvent(CancellationNotePdfDocument doc,
-                                                                 KafkaCancellationNoteProcessCommand command) {
+                                                                   String documentId, String documentNumber,
+                                                                   String sagaId, String correlationId) {
         return new CancellationNotePdfGeneratedEvent(
-                command.getSagaId(),
-                command.getDocumentId(),
+                sagaId,
+                documentId,
                 doc.getCancellationNoteNumber(),
                 doc.getDocumentUrl(),
                 doc.getFileSize(),
                 doc.isXmlEmbedded(),
-                command.getCorrelationId());
+                correlationId);
     }
 
     private CancellationNotePdfDocument requireDocument(UUID documentId) {
