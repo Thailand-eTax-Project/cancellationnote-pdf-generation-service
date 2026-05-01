@@ -1,0 +1,33 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.classpath
+.project
+.factorypath
+.settings/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Build
+target/
+*.jar
+*.war
+*.class
+
+# Logs
+*.log
+logs/
+
+# Claude Code
+.claude/
+CLAUDE.md
