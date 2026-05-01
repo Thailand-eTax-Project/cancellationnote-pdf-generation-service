@@ -7,8 +7,7 @@ import com.wpanther.cancellationnote.pdf.application.port.out.SignedXmlFetchPort
 import com.wpanther.cancellationnote.pdf.domain.service.CancellationNotePdfGenerationService;
 import com.wpanther.cancellationnote.pdf.domain.model.GenerationStatus;
 import com.wpanther.cancellationnote.pdf.domain.model.CancellationNotePdfDocument;
-import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.KafkaCancellationNoteCompensateCommand;
-import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.KafkaCancellationNoteProcessCommand;
+import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.SagaCommandHandler;
 import com.wpanther.cancellationnote.pdf.domain.exception.CancellationNotePdfGenerationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -49,21 +48,6 @@ class SagaCommandHandlerTest {
     private static final String SIGNED_XML_URL = "http://minio:9000/signed/cancellationnote-signed.xml";
     private static final String SIGNED_XML_CONTENT = "<CancellationNote>signed</CancellationNote>";
 
-    private KafkaCancellationNoteProcessCommand createProcessCommand() {
-        return new KafkaCancellationNoteProcessCommand(
-                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456",
-                "doc-123", "CN-2024-001",
-                SIGNED_XML_URL
-        );
-    }
-
-    private KafkaCancellationNoteCompensateCommand createCompensateCommand() {
-        return new KafkaCancellationNoteCompensateCommand(
-                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456",
-                "doc-123"
-        );
-    }
-
     private CancellationNotePdfDocument createCompletedDocument() {
         CancellationNotePdfDocument doc = CancellationNotePdfDocument.builder()
                 .id(UUID.randomUUID())
@@ -78,10 +62,9 @@ class SagaCommandHandlerTest {
     }
 
     @Test
-    @DisplayName("handle() process command: generates PDF and publishes SUCCESS")
-    void testHandleProcessCommand_Success() throws Exception {
+    @DisplayName("handle() process: generates PDF and publishes SUCCESS")
+    void testHandleProcess_Success() throws Exception {
         // Given
-        KafkaCancellationNoteProcessCommand command = createProcessCommand();
         when(pdfDocumentService.findByCancellationNoteId("doc-123")).thenReturn(Optional.empty());
         when(signedXmlFetchPort.fetch(SIGNED_XML_URL)).thenReturn(SIGNED_XML_CONTENT);
 
@@ -103,7 +86,8 @@ class SagaCommandHandlerTest {
                 .thenReturn("http://localhost:9000/cancellationnotes/2024/01/15/cancellationnote-CN-2024-001-abc.pdf");
 
         // When
-        getHandler().handle(command);
+        getHandler().handle("doc-123", "CN-2024-001", SIGNED_XML_URL,
+                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
 
         // Then
         verify(pdfDocumentService).beginGeneration("doc-123", "CN-2024-001");
@@ -115,31 +99,41 @@ class SagaCommandHandlerTest {
                 eq("http://localhost:9000/cancellationnotes/2024/01/15/cancellationnote-CN-2024-001-abc.pdf"),
                 eq(5000L),
                 eq(-1),
-                eq(command)
+                eq("doc-123"),
+                eq("CN-2024-001"),
+                eq("saga-001"),
+                eq(SagaStep.GENERATE_CANCELLATION_NOTE_PDF),
+                eq("corr-456")
         );
     }
 
     @Test
-    @DisplayName("handle() process command: idempotent SUCCESS for already completed document")
-    void testHandleProcessCommand_AlreadyCompleted() {
+    @DisplayName("handle() process: idempotent SUCCESS for already completed document")
+    void testHandleProcess_AlreadyCompleted() {
         // Given
-        KafkaCancellationNoteProcessCommand command = createProcessCommand();
         CancellationNotePdfDocument completedDoc = createCompletedDocument();
         when(pdfDocumentService.findByCancellationNoteId("doc-123")).thenReturn(Optional.of(completedDoc));
 
         // When
-        getHandler().handle(command);
+        getHandler().handle("doc-123", "CN-2024-001", SIGNED_XML_URL,
+                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
 
         // Then
         verify(pdfDocumentService, never()).beginGeneration(anyString(), anyString());
-        verify(pdfDocumentService).publishIdempotentSuccess(completedDoc, command);
+        verify(pdfDocumentService).publishIdempotentSuccess(
+                eq(completedDoc),
+                eq("doc-123"),
+                eq("CN-2024-001"),
+                eq("saga-001"),
+                eq(SagaStep.GENERATE_CANCELLATION_NOTE_PDF),
+                eq("corr-456")
+        );
     }
 
     @Test
-    @DisplayName("handle() process command: FAILURE when max retries exceeded")
-    void testHandleProcessCommand_MaxRetriesExceeded() {
+    @DisplayName("handle() process: FAILURE when max retries exceeded")
+    void testHandleProcess_MaxRetriesExceeded() {
         // Given
-        KafkaCancellationNoteProcessCommand command = createProcessCommand();
         CancellationNotePdfDocument failedDoc = CancellationNotePdfDocument.builder()
                 .id(UUID.randomUUID())
                 .cancellationNoteId("doc-123")
@@ -150,65 +144,71 @@ class SagaCommandHandlerTest {
         when(pdfDocumentService.findByCancellationNoteId("doc-123")).thenReturn(Optional.of(failedDoc));
 
         // When
-        getHandler().handle(command);
+        getHandler().handle("doc-123", "CN-2024-001", SIGNED_XML_URL,
+                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
 
         // Then
-        verify(pdfDocumentService).publishRetryExhausted(command);
+        verify(pdfDocumentService).publishRetryExhausted(
+                eq("saga-001"),
+                eq(SagaStep.GENERATE_CANCELLATION_NOTE_PDF),
+                eq("corr-456"),
+                eq("doc-123"),
+                eq("CN-2024-001")
+        );
     }
 
     @Test
-    @DisplayName("handle() process command: FAILURE on signedXmlUrl validation")
-    void testHandleProcessCommand_NullSignedXmlUrl() {
-        // Given
-        KafkaCancellationNoteProcessCommand command = new KafkaCancellationNoteProcessCommand(
-                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456",
-                "doc-123", "CN-2024-001",
-                null);
-
+    @DisplayName("handle() process: FAILURE on signedXmlUrl validation")
+    void testHandleProcess_NullSignedXmlUrl() {
         // When
-        getHandler().handle(command);
+        getHandler().handle("doc-123", "CN-2024-001", null,
+                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
 
         // Then
-        verify(pdfDocumentService).publishGenerationFailure(command, "signedXmlUrl is null or blank");
+        verify(pdfDocumentService).publishGenerationFailure(
+                eq("saga-001"),
+                eq(SagaStep.GENERATE_CANCELLATION_NOTE_PDF),
+                eq("corr-456"),
+                eq("signedXmlUrl is null or blank")
+        );
     }
 
     @Test
-    @DisplayName("handle() process command: FAILURE on null documentId validation")
-    void testHandleProcessCommand_NullDocumentId() {
-        // Given
-        KafkaCancellationNoteProcessCommand command = new KafkaCancellationNoteProcessCommand(
-                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456",
-                null, "CN-2024-001",
-                SIGNED_XML_URL);
-
+    @DisplayName("handle() process: FAILURE on null documentId validation")
+    void testHandleProcess_NullDocumentId() {
         // When
-        getHandler().handle(command);
+        getHandler().handle(null, "CN-2024-001", SIGNED_XML_URL,
+                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
 
         // Then
-        verify(pdfDocumentService).publishGenerationFailure(command, "documentId is null or blank");
+        verify(pdfDocumentService).publishGenerationFailure(
+                eq("saga-001"),
+                eq(SagaStep.GENERATE_CANCELLATION_NOTE_PDF),
+                eq("corr-456"),
+                eq("documentId is null or blank")
+        );
     }
 
     @Test
-    @DisplayName("handle() process command: FAILURE on null documentNumber validation")
-    void testHandleProcessCommand_NullDocumentNumber() {
-        // Given
-        KafkaCancellationNoteProcessCommand command = new KafkaCancellationNoteProcessCommand(
-                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456",
-                "doc-123", null,
-                SIGNED_XML_URL);
-
+    @DisplayName("handle() process: FAILURE on null documentNumber validation")
+    void testHandleProcess_NullDocumentNumber() {
         // When
-        getHandler().handle(command);
+        getHandler().handle("doc-123", null, SIGNED_XML_URL,
+                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
 
         // Then
-        verify(pdfDocumentService).publishGenerationFailure(command, "documentNumber is null or blank");
+        verify(pdfDocumentService).publishGenerationFailure(
+                eq("saga-001"),
+                eq(SagaStep.GENERATE_CANCELLATION_NOTE_PDF),
+                eq("corr-456"),
+                eq("documentNumber is null or blank")
+        );
     }
 
     @Test
-    @DisplayName("handle() process command: FAILURE on PDF generation failure")
-    void testHandleProcessCommand_GenerationFails() throws Exception {
+    @DisplayName("handle() process: FAILURE on PDF generation failure")
+    void testHandleProcess_GenerationFails() throws Exception {
         // Given
-        KafkaCancellationNoteProcessCommand command = createProcessCommand();
         when(pdfDocumentService.findByCancellationNoteId("doc-123")).thenReturn(Optional.empty());
         when(signedXmlFetchPort.fetch(SIGNED_XML_URL)).thenReturn(SIGNED_XML_CONTENT);
 
@@ -225,92 +225,96 @@ class SagaCommandHandlerTest {
                 .thenThrow(new CancellationNotePdfGenerationException("FOP failed"));
 
         // When
-        getHandler().handle(command);
+        getHandler().handle("doc-123", "CN-2024-001", SIGNED_XML_URL,
+                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
 
         // Then
         verify(pdfDocumentService).failGenerationAndPublish(
                 eq(generatingDoc.getId()),
                 contains("CancellationNotePdfGenerationException: FOP failed"),
                 eq(-1),
-                eq(command)
+                eq("saga-001"),
+                eq(SagaStep.GENERATE_CANCELLATION_NOTE_PDF),
+                eq("corr-456")
         );
     }
 
     @Test
-    @DisplayName("handle() process command: FAILURE on circuit breaker open")
-    void testHandleProcessCommand_CircuitBreakerOpen() throws Exception {
+    @DisplayName("handle() process: FAILURE on circuit breaker open")
+    void testHandleProcess_CircuitBreakerOpen() throws Exception {
         // Given
-        KafkaCancellationNoteProcessCommand command = createProcessCommand();
         when(pdfDocumentService.findByCancellationNoteId("doc-123")).thenReturn(Optional.empty());
         when(signedXmlFetchPort.fetch(SIGNED_XML_URL))
                 .thenThrow(new RuntimeException("Circuit breaker open"));
 
         // When
-        getHandler().handle(command);
+        getHandler().handle("doc-123", "CN-2024-001", SIGNED_XML_URL,
+                "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
 
-        // Then - exception happens before document is created, so publishGenerationFailure is called
-        verify(pdfDocumentService).publishGenerationFailure(eq(command), anyString());
+        // Then
+        verify(pdfDocumentService).publishGenerationFailure(
+                eq("saga-001"),
+                eq(SagaStep.GENERATE_CANCELLATION_NOTE_PDF),
+                eq("corr-456"),
+                anyString()
+        );
     }
 
     @Test
-    @DisplayName("handle() compensate command: deletes document and publishes COMPENSATED")
+    @DisplayName("handle() compensate: deletes document and publishes COMPENSATED")
     void testHandleCompensation_Success() {
         // Given
-        KafkaCancellationNoteCompensateCommand command = createCompensateCommand();
         CancellationNotePdfDocument doc = createCompletedDocument();
         when(pdfDocumentService.findByCancellationNoteId("doc-123")).thenReturn(Optional.of(doc));
 
         // When
-        getHandler().handle(command);
+        getHandler().handle("doc-123", "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
 
         // Then
         verify(pdfStoragePort).delete("2024/01/15/cancellationnote-CN-2024-001-abc.pdf");
         verify(pdfDocumentService).deleteById(doc.getId());
-        verify(pdfDocumentService).publishCompensated(command);
+        verify(pdfDocumentService).publishCompensated("saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
     }
 
     @Test
-    @DisplayName("handle() compensate command: COMPENSATED even when document not found")
+    @DisplayName("handle() compensate: COMPENSATED even when document not found")
     void testHandleCompensation_NoDocumentFound() {
         // Given
-        KafkaCancellationNoteCompensateCommand command = createCompensateCommand();
         when(pdfDocumentService.findByCancellationNoteId("doc-123")).thenReturn(Optional.empty());
 
         // When
-        getHandler().handle(command);
+        getHandler().handle("doc-123", "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
 
         // Then
         verify(pdfStoragePort, never()).delete(anyString());
         verify(pdfDocumentService, never()).deleteById(any());
-        verify(pdfDocumentService).publishCompensated(command);
+        verify(pdfDocumentService).publishCompensated("saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
     }
 
     @Test
-    @DisplayName("handle() compensate command: publishes COMPENSATED even when storage deletion fails (storage errors are logged only)")
+    @DisplayName("handle() compensate: publishes COMPENSATED even when storage deletion fails (storage errors are logged only)")
     void testHandleCompensation_StorageFailure() {
         // Given
-        KafkaCancellationNoteCompensateCommand command = createCompensateCommand();
         CancellationNotePdfDocument doc = createCompletedDocument();
         when(pdfDocumentService.findByCancellationNoteId("doc-123")).thenReturn(Optional.of(doc));
         doThrow(new RuntimeException("MinIO unavailable")).when(pdfStoragePort).delete(anyString());
 
         // When
-        getHandler().handle(command);
+        getHandler().handle("doc-123", "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
 
         // Then - storage deletion failures are swallowed, compensation succeeds
         verify(pdfDocumentService).deleteById(doc.getId());
-        verify(pdfDocumentService).publishCompensated(command);
+        verify(pdfDocumentService).publishCompensated("saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456");
     }
 
     @Test
     @DisplayName("publishOrchestrationFailure() publishes failure for DLQ events")
     void testPublishOrchestrationFailure() {
         // Given
-        KafkaCancellationNoteProcessCommand command = createProcessCommand();
         Throwable cause = new RuntimeException("DLQ error");
 
         // When
-        getHandler().publishOrchestrationFailure(command, cause);
+        getHandler().publishOrchestrationFailure("saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456", cause);
 
         // Then
         verify(sagaReplyPort).publishFailure(eq("saga-001"), eq(SagaStep.GENERATE_CANCELLATION_NOTE_PDF), eq("corr-456"),
@@ -321,11 +325,10 @@ class SagaCommandHandlerTest {
     @DisplayName("publishCompensationOrchestrationFailure() publishes failure for compensation DLQ")
     void testPublishCompensationOrchestrationFailure() {
         // Given
-        KafkaCancellationNoteCompensateCommand command = createCompensateCommand();
         Throwable cause = new RuntimeException("Compensation DLQ error");
 
         // When
-        getHandler().publishCompensationOrchestrationFailure(command, cause);
+        getHandler().publishCompensationOrchestrationFailure("saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456", cause);
 
         // Then
         verify(sagaReplyPort).publishFailure(eq("saga-001"), eq(SagaStep.GENERATE_CANCELLATION_NOTE_PDF), eq("corr-456"),

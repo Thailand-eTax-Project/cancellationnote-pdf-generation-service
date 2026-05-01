@@ -3,13 +3,13 @@ package com.wpanther.cancellationnote.pdf.infrastructure.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.wpanther.saga.domain.enums.SagaStep;
-import com.wpanther.cancellationnote.pdf.application.service.SagaCommandHandler;
-import com.wpanther.cancellationnote.pdf.application.usecase.CompensateCancellationNotePdfUseCase;
-import com.wpanther.cancellationnote.pdf.application.usecase.ProcessCancellationNotePdfUseCase;
-import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.KafkaCancellationNoteCompensateCommand;
-import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.KafkaCancellationNoteProcessCommand;
+import com.wpanther.cancellationnote.pdf.application.port.in.CompensateCancellationNotePdfUseCase;
+import com.wpanther.cancellationnote.pdf.application.port.in.ProcessCancellationNotePdfUseCase;
+import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.SagaCommandHandler;
+import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.dto.CompensateCancellationNotePdfCommand;
+import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.dto.ProcessCancellationNotePdfCommand;
 import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.SagaRouteConfig;
-import com.wpanther.cancellationnote.pdf.infrastructure.adapter.out.messaging.CancellationNotePdfGeneratedEvent;
+import com.wpanther.cancellationnote.pdf.application.dto.event.CancellationNotePdfGeneratedEvent;
 import com.wpanther.cancellationnote.pdf.infrastructure.adapter.out.messaging.CancellationNotePdfReplyEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,10 +46,10 @@ class CamelRouteConfigTest {
     }
 
     @Test
-    @DisplayName("Should serialize and deserialize KafkaCancellationNoteProcessCommand")
+    @DisplayName("Should serialize and deserialize ProcessCancellationNotePdfCommand")
     void testProcessCommandSerialization() throws Exception {
         // Given
-        KafkaCancellationNoteProcessCommand command = new KafkaCancellationNoteProcessCommand(
+        ProcessCancellationNotePdfCommand command = new ProcessCancellationNotePdfCommand(
                 "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456",
                 "doc-123", "CN-2024-001",
                 "http://minio/cancellationnote-signed.xml"
@@ -57,7 +57,7 @@ class CamelRouteConfigTest {
 
         // When
         String json = objectMapper.writeValueAsString(command);
-        KafkaCancellationNoteProcessCommand deserialized = objectMapper.readValue(json, KafkaCancellationNoteProcessCommand.class);
+        ProcessCancellationNotePdfCommand deserialized = objectMapper.readValue(json, ProcessCancellationNotePdfCommand.class);
 
         // Then
         assertThat(deserialized.getSagaId()).isEqualTo("saga-001");
@@ -70,17 +70,17 @@ class CamelRouteConfigTest {
     }
 
     @Test
-    @DisplayName("Should serialize and deserialize KafkaCancellationNoteCompensateCommand")
+    @DisplayName("Should serialize and deserialize CompensateCancellationNotePdfCommand")
     void testCompensateCommandSerialization() throws Exception {
         // Given
-        KafkaCancellationNoteCompensateCommand command = new KafkaCancellationNoteCompensateCommand(
+        CompensateCancellationNotePdfCommand command = new CompensateCancellationNotePdfCommand(
                 "saga-001", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-456",
                 "doc-123"
         );
 
         // When
         String json = objectMapper.writeValueAsString(command);
-        KafkaCancellationNoteCompensateCommand deserialized = objectMapper.readValue(json, KafkaCancellationNoteCompensateCommand.class);
+        CompensateCancellationNotePdfCommand deserialized = objectMapper.readValue(json, CompensateCancellationNotePdfCommand.class);
 
         // Then
         assertThat(deserialized.getSagaId()).isEqualTo("saga-001");
@@ -137,7 +137,7 @@ class CamelRouteConfigTest {
     }
 
     @Test
-    @DisplayName("Should deserialize KafkaCancellationNoteProcessCommand from JSON")
+    @DisplayName("Should deserialize ProcessCancellationNotePdfCommand from JSON")
     void testProcessCommandDeserialization() throws Exception {
         // Given - sagaStep uses kebab-case code as serialized by SagaStep @JsonValue
         String json = """
@@ -156,7 +156,7 @@ class CamelRouteConfigTest {
             """;
 
         // When
-        KafkaCancellationNoteProcessCommand cmd = objectMapper.readValue(json, KafkaCancellationNoteProcessCommand.class);
+        ProcessCancellationNotePdfCommand cmd = objectMapper.readValue(json, ProcessCancellationNotePdfCommand.class);
 
         // Then
         assertThat(cmd.getEventId()).isEqualTo(UUID.fromString("550e8400-e29b-41d4-a716-446655440000"));

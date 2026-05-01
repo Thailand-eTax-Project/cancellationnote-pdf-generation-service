@@ -6,9 +6,7 @@ import com.wpanther.cancellationnote.pdf.application.port.out.SagaReplyPort;
 import com.wpanther.cancellationnote.pdf.domain.model.GenerationStatus;
 import com.wpanther.cancellationnote.pdf.domain.model.CancellationNotePdfDocument;
 import com.wpanther.cancellationnote.pdf.domain.repository.CancellationNotePdfDocumentRepository;
-import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.KafkaCancellationNoteCompensateCommand;
-import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.KafkaCancellationNoteProcessCommand;
-import com.wpanther.cancellationnote.pdf.infrastructure.adapter.out.messaging.CancellationNotePdfGeneratedEvent;
+import com.wpanther.cancellationnote.pdf.application.dto.event.CancellationNotePdfGeneratedEvent;
 import com.wpanther.cancellationnote.pdf.infrastructure.metrics.PdfGenerationMetrics;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,18 +38,8 @@ class CancellationNotePdfDocumentServiceTest {
     @Mock
     private PdfGenerationMetrics pdfGenerationMetrics;
 
-    // Note: Using reflection to instantiate because Lombok @RequiredArgsConstructor
-    // is scope=provided, not available during test compilation
     private CancellationNotePdfDocumentService getService() {
-        try {
-            return CancellationNotePdfDocumentService.class
-                    .getDeclaredConstructor(CancellationNotePdfDocumentRepository.class,
-                                           PdfEventPort.class, SagaReplyPort.class,
-                                           PdfGenerationMetrics.class)
-                    .newInstance(repository, pdfEventPort, sagaReplyPort, pdfGenerationMetrics);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to instantiate CancellationNotePdfDocumentService", e);
-        }
+        return new CancellationNotePdfDocumentService(repository, pdfEventPort, sagaReplyPort, pdfGenerationMetrics);
     }
 
     private CancellationNotePdfDocument createCompletedDocument() {
@@ -59,10 +47,9 @@ class CancellationNotePdfDocumentServiceTest {
                 .id(UUID.randomUUID())
                 .cancellationNoteId("cn-inv-001")
                 .cancellationNoteNumber("CN-001")
-                .status(GenerationStatus.GENERATING) // Start in GENERATING
+                .status(GenerationStatus.GENERATING)
                 .mimeType("application/pdf")
                 .build();
-        // Now transition to COMPLETED via the proper method
         doc.markCompleted("2024/01/15/test.pdf", "http://localhost:9000/cancellationnotes/test.pdf", 5000L);
         doc.markXmlEmbedded();
         return doc;
@@ -127,14 +114,10 @@ class CancellationNotePdfDocumentServiceTest {
     void testPublishIdempotentSuccess() {
         // Given
         CancellationNotePdfDocument doc = createCompletedDocument();
-        KafkaCancellationNoteProcessCommand command = new KafkaCancellationNoteProcessCommand(
-                "saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
-                "doc-1", "CN-001",
-                "http://minio:9000/signed.xml");
 
         // When
         var service = getService();
-        service.publishIdempotentSuccess(doc, command);
+        service.publishIdempotentSuccess(doc, "doc-1", "CN-001", "saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1");
 
         // Then
         verify(pdfEventPort).publishGenerated(any(CancellationNotePdfGeneratedEvent.class));
@@ -145,15 +128,10 @@ class CancellationNotePdfDocumentServiceTest {
     @Test
     @DisplayName("publishRetryExhausted() publishes failure reply")
     void testPublishRetryExhausted() {
-        // Given
-        KafkaCancellationNoteProcessCommand command = new KafkaCancellationNoteProcessCommand(
-                "saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
-                "doc-1", "CN-001",
-                "http://minio:9000/signed.xml");
-
         // When
         var service = getService();
-        service.publishRetryExhausted(command);
+        service.publishRetryExhausted("saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
+                "doc-1", "CN-001");
 
         // Then
         verify(pdfGenerationMetrics).recordRetryExhausted("saga-1", "doc-1", "CN-001");
@@ -164,33 +142,22 @@ class CancellationNotePdfDocumentServiceTest {
     @Test
     @DisplayName("publishGenerationFailure() publishes failure with error message")
     void testPublishGenerationFailure() {
-        // Given
-        KafkaCancellationNoteProcessCommand command = new KafkaCancellationNoteProcessCommand(
-                "saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
-                "doc-1", "CN-001",
-                "http://minio:9000/signed.xml");
-        String errorMessage = "Invalid XML format";
-
         // When
         var service = getService();
-        service.publishGenerationFailure(command, errorMessage);
+        service.publishGenerationFailure("saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
+                "Invalid XML format");
 
         // Then
         verify(sagaReplyPort).publishFailure("saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
-                errorMessage);
+                "Invalid XML format");
     }
 
     @Test
     @DisplayName("publishCompensated() publishes COMPENSATED reply")
     void testPublishCompensated() {
-        // Given
-        KafkaCancellationNoteCompensateCommand command = new KafkaCancellationNoteCompensateCommand(
-                "saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
-                "doc-1");
-
         // When
         var service = getService();
-        service.publishCompensated(command);
+        service.publishCompensated("saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1");
 
         // Then
         verify(sagaReplyPort).publishCompensated("saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1");
@@ -199,18 +166,14 @@ class CancellationNotePdfDocumentServiceTest {
     @Test
     @DisplayName("publishCompensationFailure() publishes failure for compensation error")
     void testPublishCompensationFailure() {
-        // Given
-        KafkaCancellationNoteCompensateCommand command = new KafkaCancellationNoteCompensateCommand(
-                "saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
-                "doc-1");
-        String error = "Failed to delete PDF file";
-
         // When
         var service = getService();
-        service.publishCompensationFailure(command, error);
+        service.publishCompensationFailure("saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
+                "Failed to delete PDF file");
 
         // Then
-        verify(sagaReplyPort).publishFailure("saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1", error);
+        verify(sagaReplyPort).publishFailure("saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
+                "Failed to delete PDF file");
     }
 
     @Test
@@ -226,7 +189,6 @@ class CancellationNotePdfDocumentServiceTest {
                 .mimeType("application/pdf")
                 .build();
 
-        // Create a completed document with the same ID for the mock return
         CancellationNotePdfDocument savedDoc = CancellationNotePdfDocument.builder()
                 .id(documentId)
                 .cancellationNoteId("cn-inv-001")
@@ -240,15 +202,11 @@ class CancellationNotePdfDocumentServiceTest {
         when(repository.findById(documentId)).thenReturn(Optional.of(doc));
         when(repository.save(any())).thenReturn(savedDoc);
 
-        KafkaCancellationNoteProcessCommand command = new KafkaCancellationNoteProcessCommand(
-                "saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
-                "doc-1", "CN-001",
-                "http://minio:9000/signed.xml");
-
         // When
         var service = getService();
         service.completeGenerationAndPublish(documentId, "2024/01/15/test.pdf",
-                "http://localhost:9000/cancellationnotes/test.pdf", 5000L, 0, command);
+                "http://localhost:9000/cancellationnotes/test.pdf", 5000L, 0,
+                "doc-1", "CN-001", "saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1");
 
         // Then
         ArgumentCaptor<CancellationNotePdfDocument> captor = ArgumentCaptor.forClass(CancellationNotePdfDocument.class);
@@ -286,15 +244,12 @@ class CancellationNotePdfDocumentServiceTest {
         when(repository.findById(documentId)).thenReturn(Optional.of(doc));
         when(repository.save(any())).thenReturn(savedDoc);
 
-        KafkaCancellationNoteProcessCommand command = new KafkaCancellationNoteProcessCommand(
-                "saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1",
-                "doc-1", "CN-001",
-                "http://minio:9000/signed.xml");
         String errorMessage = "PDF generation failed";
 
         // When
         var service = getService();
-        service.failGenerationAndPublish(documentId, errorMessage, 0, command);
+        service.failGenerationAndPublish(documentId, errorMessage, 0,
+                "saga-1", SagaStep.GENERATE_CANCELLATION_NOTE_PDF, "corr-1");
 
         // Then
         ArgumentCaptor<CancellationNotePdfDocument> captor = ArgumentCaptor.forClass(CancellationNotePdfDocument.class);
