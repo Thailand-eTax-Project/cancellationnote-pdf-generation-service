@@ -2,9 +2,11 @@ package com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wpanther.cancellationnote.pdf.application.port.in.CompensateCancellationNotePdfUseCase;
+import com.wpanther.cancellationnote.pdf.application.port.in.ProcessCancellationNotePdfUseCase;
 import com.wpanther.cancellationnote.pdf.application.service.SagaCommandHandler;
-import com.wpanther.cancellationnote.pdf.application.usecase.CompensateCancellationNotePdfUseCase;
-import com.wpanther.cancellationnote.pdf.application.usecase.ProcessCancellationNotePdfUseCase;
+import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.dto.CompensateCancellationNotePdfCommand;
+import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.dto.ProcessCancellationNotePdfCommand;
 import com.wpanther.saga.domain.enums.SagaStep;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.camel.Exchange;
@@ -48,14 +50,16 @@ public class SagaRouteConfig extends RouteBuilder {
                         .onPrepareFailure(exchange -> {
                             Throwable cause = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, Throwable.class);
                             Object body = exchange.getIn().getBody();
-                            if (body instanceof KafkaCancellationNoteProcessCommand cmd) {
+                            if (body instanceof ProcessCancellationNotePdfCommand cmd) {
                                 log.error("DLQ: notifying orchestrator of retry exhaustion for saga {} document {}",
                                         cmd.getSagaId(), cmd.getDocumentNumber());
-                                sagaCommandHandler.publishOrchestrationFailure(cmd, cause);
-                            } else if (body instanceof KafkaCancellationNoteCompensateCommand cmd) {
+                                sagaCommandHandler.publishOrchestrationFailure(
+                                        cmd.getSagaId(), cmd.getSagaStep(), cmd.getCorrelationId(), cause);
+                            } else if (body instanceof CompensateCancellationNotePdfCommand cmd) {
                                 log.error("DLQ: notifying orchestrator of compensation retry exhaustion for saga {} document {}",
                                         cmd.getSagaId(), cmd.getDocumentId());
-                                sagaCommandHandler.publishCompensationOrchestrationFailure(cmd, cause);
+                                sagaCommandHandler.publishCompensationOrchestrationFailure(
+                                        cmd.getSagaId(), cmd.getSagaStep(), cmd.getCorrelationId(), cause);
                             } else {
                                 log.error("DLQ: body not deserialized ({}); attempting saga metadata recovery",
                                         body == null ? "null" : body.getClass().getSimpleName());
@@ -72,13 +76,19 @@ public class SagaRouteConfig extends RouteBuilder {
                         + "&maxPollRecords={{app.kafka.consumer.max-poll-records:100}}"
                         + "&consumersCount={{app.kafka.consumer.consumers-count:3}}")
                 .routeId("saga-command-consumer")
-                .unmarshal().json(JsonLibrary.Jackson, KafkaCancellationNoteProcessCommand.class)
+                .log(LoggingLevel.DEBUG, "Received saga command from Kafka: partition=${header[kafka.PARTITION]}, offset=${header[kafka.OFFSET]}")
+                .unmarshal().json(JsonLibrary.Jackson, ProcessCancellationNotePdfCommand.class)
                 .process(exchange -> {
-                        KafkaCancellationNoteProcessCommand cmd =
-                                exchange.getIn().getBody(KafkaCancellationNoteProcessCommand.class);
+                        ProcessCancellationNotePdfCommand cmd = exchange.getIn().getBody(ProcessCancellationNotePdfCommand.class);
                         log.info("Processing saga command for saga: {}, document: {}",
                                         cmd.getSagaId(), cmd.getDocumentNumber());
-                        processUseCase.handle(cmd);
+                        processUseCase.handle(
+                                cmd.getDocumentId(),
+                                cmd.getDocumentNumber(),
+                                cmd.getSignedXmlUrl(),
+                                cmd.getSagaId(),
+                                cmd.getSagaStep(),
+                                cmd.getCorrelationId());
                 })
                 .log("Successfully processed saga command");
 
@@ -91,13 +101,17 @@ public class SagaRouteConfig extends RouteBuilder {
                         + "&maxPollRecords={{app.kafka.consumer.max-poll-records:100}}"
                         + "&consumersCount={{app.kafka.consumer.consumers-count:3}}")
                 .routeId("saga-compensation-consumer")
-                .unmarshal().json(JsonLibrary.Jackson, KafkaCancellationNoteCompensateCommand.class)
+                .log(LoggingLevel.DEBUG, "Received compensation command from Kafka: partition=${header[kafka.PARTITION]}, offset=${header[kafka.OFFSET]}")
+                .unmarshal().json(JsonLibrary.Jackson, CompensateCancellationNotePdfCommand.class)
                 .process(exchange -> {
-                        KafkaCancellationNoteCompensateCommand cmd =
-                                exchange.getIn().getBody(KafkaCancellationNoteCompensateCommand.class);
+                        CompensateCancellationNotePdfCommand cmd = exchange.getIn().getBody(CompensateCancellationNotePdfCommand.class);
                         log.info("Processing compensation for saga: {}, document: {}",
                                         cmd.getSagaId(), cmd.getDocumentId());
-                        compensateUseCase.handle(cmd);
+                        compensateUseCase.handle(
+                                cmd.getDocumentId(),
+                                cmd.getSagaId(),
+                                cmd.getSagaStep(),
+                                cmd.getCorrelationId());
                 })
                 .log("Successfully processed compensation command");
     }
