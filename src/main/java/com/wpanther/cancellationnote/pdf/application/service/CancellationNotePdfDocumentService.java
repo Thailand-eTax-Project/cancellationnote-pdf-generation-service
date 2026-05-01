@@ -7,7 +7,7 @@ import com.wpanther.cancellationnote.pdf.domain.model.CancellationNotePdfDocumen
 import com.wpanther.cancellationnote.pdf.domain.repository.CancellationNotePdfDocumentRepository;
 import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.KafkaCancellationNoteCompensateCommand;
 import com.wpanther.cancellationnote.pdf.infrastructure.adapter.in.kafka.KafkaCancellationNoteProcessCommand;
-import com.wpanther.cancellationnote.pdf.infrastructure.adapter.out.messaging.CancellationNotePdfGeneratedEvent;
+import com.wpanther.cancellationnote.pdf.application.dto.event.CancellationNotePdfGeneratedEvent;
 import com.wpanther.cancellationnote.pdf.infrastructure.metrics.PdfGenerationMetrics;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

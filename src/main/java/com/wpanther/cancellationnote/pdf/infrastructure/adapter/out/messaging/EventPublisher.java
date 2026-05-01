@@ -1,6 +1,7 @@
 package com.wpanther.cancellationnote.pdf.infrastructure.adapter.out.messaging;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wpanther.cancellationnote.pdf.application.dto.event.CancellationNotePdfGeneratedEvent;
 import com.wpanther.cancellationnote.pdf.application.port.out.PdfEventPort;
 import com.wpanther.saga.infrastructure.outbox.OutboxService;
 import lombok.RequiredArgsConstructor;
