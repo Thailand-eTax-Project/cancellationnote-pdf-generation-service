@@ -48,6 +48,7 @@ app:
       max-poll-records: ${KAFKA_MAX_POLL_RECORDS:100}
       consumers-count: ${KAFKA_CONSUMERS_COUNT:3}
     topics:
+      saga-reply-cancellation-note-pdf: saga.reply.cancellation-note-pdf
       saga-command-cancellation-note-pdf: saga.command.cancellation-note-pdf
       saga-compensation-cancellation-note-pdf: saga.compensation.cancellation-note-pdf
       pdf-generated-cancellation-note: pdf.generated.cancellation-note

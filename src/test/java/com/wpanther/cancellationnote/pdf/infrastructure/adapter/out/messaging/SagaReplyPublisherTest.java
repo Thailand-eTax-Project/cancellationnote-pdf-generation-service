@@ -32,7 +32,7 @@ class SagaReplyPublisherTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        sagaReplyPublisher = new SagaReplyPublisher(outboxService, objectMapper);
+        sagaReplyPublisher = new SagaReplyPublisher(outboxService, objectMapper, "saga.reply.cancellation-note-pdf");
     }
 
     @Test

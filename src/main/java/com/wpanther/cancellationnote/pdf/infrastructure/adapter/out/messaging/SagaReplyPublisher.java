@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wpanther.cancellationnote.pdf.application.port.out.SagaReplyPort;
 import com.wpanther.saga.domain.enums.SagaStep;
 import com.wpanther.saga.infrastructure.outbox.OutboxService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,15 +17,23 @@ import java.util.Map;
  * Replies are sent to orchestrator via saga.reply.cancellation-note-pdf topic.
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class SagaReplyPublisher implements SagaReplyPort {
 
-    private static final String REPLY_TOPIC = "saga.reply.cancellation-note-pdf";
     private static final String AGGREGATE_TYPE = OutboxConstants.AGGREGATE_TYPE;
 
     private final OutboxService outboxService;
     private final ObjectMapper objectMapper;
+    private final String replyTopic;
+
+    public SagaReplyPublisher(
+            OutboxService outboxService,
+            ObjectMapper objectMapper,
+            @Value("${app.kafka.topics.saga-reply-cancellation-note-pdf:saga.reply.cancellation-note-pdf}") String replyTopic) {
+        this.outboxService = outboxService;
+        this.objectMapper = objectMapper;
+        this.replyTopic = replyTopic;
+    }
 
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
@@ -43,7 +51,7 @@ public class SagaReplyPublisher implements SagaReplyPort {
                 reply,
                 AGGREGATE_TYPE,
                 sagaId,
-                REPLY_TOPIC,
+                replyTopic,
                 sagaId,
                 toJson(headers)
         );
@@ -67,7 +75,7 @@ public class SagaReplyPublisher implements SagaReplyPort {
                 reply,
                 AGGREGATE_TYPE,
                 sagaId,
-                REPLY_TOPIC,
+                replyTopic,
                 sagaId,
                 toJson(headers)
         );
@@ -90,7 +98,7 @@ public class SagaReplyPublisher implements SagaReplyPort {
                 reply,
                 AGGREGATE_TYPE,
                 sagaId,
-                REPLY_TOPIC,
+                replyTopic,
                 sagaId,
                 toJson(headers)
         );
