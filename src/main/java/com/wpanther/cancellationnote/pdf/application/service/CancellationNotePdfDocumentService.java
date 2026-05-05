@@ -1,6 +1,8 @@
 package com.wpanther.cancellationnote.pdf.application.service;
 
 import com.wpanther.cancellationnote.pdf.application.dto.event.CancellationNotePdfGeneratedEvent;
+import com.wpanther.cancellationnote.pdf.application.dto.event.DocumentArchiveEvent;
+import com.wpanther.cancellationnote.pdf.application.port.out.DocumentArchivePort;
 import com.wpanther.cancellationnote.pdf.application.port.out.PdfEventPort;
 import com.wpanther.cancellationnote.pdf.application.port.out.SagaReplyPort;
 import com.wpanther.cancellationnote.pdf.domain.model.CancellationNotePdfDocument;
@@ -23,6 +25,7 @@ public class CancellationNotePdfDocumentService {
     private final CancellationNotePdfDocumentRepository repository;
     private final PdfEventPort pdfEventPort;
     private final SagaReplyPort sagaReplyPort;
+    private final DocumentArchivePort documentArchivePort;
     private final PdfGenerationMetrics pdfGenerationMetrics;
 
     @Transactional(readOnly = true)
@@ -66,6 +69,19 @@ public class CancellationNotePdfDocumentService {
         doc.markXmlEmbedded();
         applyRetryCount(doc, previousRetryCount);
         doc = repository.save(doc);
+
+        // Emit document.archive for unsigned PDF archival
+        documentArchivePort.publish(new DocumentArchiveEvent(
+                cmdDocumentId,
+                doc.getCancellationNoteNumber(),
+                "CANCELLATION_NOTE",
+                "UNSIGNED_PDF",
+                doc.getDocumentUrl(),
+                doc.getCancellationNoteNumber() + ".pdf",
+                doc.getMimeType(),
+                doc.getFileSize(),
+                sagaId,
+                correlationId));
 
         pdfEventPort.publishGenerated(buildGeneratedEvent(doc, cmdDocumentId, cmdDocumentNumber, sagaId, correlationId));
         sagaReplyPort.publishSuccess(sagaId, sagaStep, correlationId, doc.getDocumentUrl(), doc.getFileSize());

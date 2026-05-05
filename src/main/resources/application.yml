@@ -52,6 +52,7 @@ app:
       saga-command-cancellation-note-pdf: saga.command.cancellation-note-pdf
       saga-compensation-cancellation-note-pdf: saga.compensation.cancellation-note-pdf
       pdf-generated-cancellation-note: pdf.generated.cancellation-note
+      document-archive: document.archive
       dlq: pdf.generation.cancellation-note.dlq
   minio:
     endpoint: ${MINIO_ENDPOINT:http://localhost:9000}

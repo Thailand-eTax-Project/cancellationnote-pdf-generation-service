@@ -1,6 +1,7 @@
 package com.wpanther.cancellationnote.pdf.application.service;
 
 import com.wpanther.saga.domain.enums.SagaStep;
+import com.wpanther.cancellationnote.pdf.application.port.out.DocumentArchivePort;
 import com.wpanther.cancellationnote.pdf.application.port.out.PdfEventPort;
 import com.wpanther.cancellationnote.pdf.application.port.out.SagaReplyPort;
 import com.wpanther.cancellationnote.pdf.domain.model.GenerationStatus;
@@ -36,10 +37,13 @@ class CancellationNotePdfDocumentServiceTest {
     private SagaReplyPort sagaReplyPort;
 
     @Mock
+    private DocumentArchivePort documentArchivePort;
+
+    @Mock
     private PdfGenerationMetrics pdfGenerationMetrics;
 
     private CancellationNotePdfDocumentService getService() {
-        return new CancellationNotePdfDocumentService(repository, pdfEventPort, sagaReplyPort, pdfGenerationMetrics);
+        return new CancellationNotePdfDocumentService(repository, pdfEventPort, sagaReplyPort, documentArchivePort, pdfGenerationMetrics);
     }
 
     private CancellationNotePdfDocument createCompletedDocument() {
